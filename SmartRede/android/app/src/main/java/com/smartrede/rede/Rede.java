@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Environment;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -11,18 +12,22 @@ import androidx.annotation.Nullable;
 
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.Arguments;
-import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.WritableMap;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Logger;
 
+import br.com.gertec.gedi.enums.GEDI_PRNTR_e_Status;
+import br.com.gertec.gedi.exceptions.GediException;
+import br.com.gertec.gedi.interfaces.ICL;
+import br.com.gertec.gedi.interfaces.IPRNTR;
 import rede.smartrede.sdk.FlexTipoPagamento;
 import rede.smartrede.sdk.Payment;
 import rede.smartrede.sdk.PaymentIntentBuilder;
@@ -36,9 +41,12 @@ public class Rede extends ReactContextBaseJavaModule implements ActivityEventLis
     private static final int PAYMENT_REQUEST_CODE = 1001;
     private static final int REVERSAL_REQUEST_CODE = 1002;
     private static final int REPRINT_REQUEST_CODE = 1003;
-
+    private static boolean isPrintInit = false;
     private RedePayments redePayments;
     private Promise mPaymentPromise;
+    private int countImages = 0;
+    private int countPrint = 0;
+
 
     //constructor
     public Rede(ReactApplicationContext reactContext) {
@@ -92,9 +100,52 @@ public class Rede extends ReactContextBaseJavaModule implements ActivityEventLis
         }
     }
 
+    @ReactMethod
+    public void reversal(Promise promise) {
+        try {
+            Activity currentActivity = getCurrentActivity();
+            Intent reversal = redePayments.intentForReversal();
+            currentActivity.startActivityForResult(reversal, REVERSAL_REQUEST_CODE);
+            mPaymentPromise = promise;
+        } catch (ActivityNotFoundException e) {
+            promise.reject("error", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void reprint(Promise promise) {
+        try {
+            Activity currentActivity = getCurrentActivity();
+            Intent reprint = redePayments.intentForReprint();
+            currentActivity.startActivityForResult(reprint, REPRINT_REQUEST_CODE);
+            mPaymentPromise = promise;
+        } catch (ActivityNotFoundException e) {
+            promise.reject("error", e.getMessage());
+        }
+    }
+    
+
+    @ReactMethod
+    public void getStatusPrint(final Promise promise) throws GediException {
+        promise.resolve("00000");
+    }
+
+    @ReactMethod
+    public void print(final Promise promise) throws IOException, Exception {
+        countPrint = 0;
+        File file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download/");
+        File[] arquivos = file.listFiles();
+        countImages = arquivos.length;
+        Log.v("LOG133", String.valueOf(countImages));
+        promise.resolve(String.valueOf(countImages));
+
+        //Print Data
+
+    }
+
+
     @Override
     public void onActivityResult(Activity activity, int requestCode, int resultCode, @Nullable Intent intent) {
-        Context context = getReactApplicationContext();
         if (requestCode == PAYMENT_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK) {
                 if (intent != null) {
@@ -117,8 +168,27 @@ public class Rede extends ReactContextBaseJavaModule implements ActivityEventLis
             } else {
                 mPaymentPromise.reject(null, "Pagamento Cancelado pelo operador");
             }
-        } else {
-            mPaymentPromise.reject(null, "ELSE");
+        } else if (requestCode == REVERSAL_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) {
+                if (intent != null) {
+                    Payment payment = RedePayments.getPaymentFromIntent(intent);
+                    if (payment.getStatus() == PaymentStatus.AUTHORIZED) {
+                        mPaymentPromise.resolve("Autorizado");
+                    } else if (payment.getStatus() == PaymentStatus.DECLINED) {
+                        mPaymentPromise.reject(null, "Reembolso Recusado");
+                    } else if (payment.getStatus() == PaymentStatus.FAILED) {
+                        mPaymentPromise.reject(null, "Reembolso Recusado");
+                    }
+                }
+            } else {
+                mPaymentPromise.reject(null, "Reembolso Cancelado pelo operador");
+            }
+        } else if (requestCode == REPRINT_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) {
+                mPaymentPromise.resolve("Reimpressão feita com sucesso");
+            } else {
+                mPaymentPromise.reject(null, "Reimpressão Cancelada");
+            }
         }
     }
 
