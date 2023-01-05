@@ -1,13 +1,18 @@
 package com.smartrede.rede;
 
+import static java.lang.Math.ceil;
+
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Environment;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.util.Base64;
 import android.util.Log;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.facebook.react.bridge.ActivityEventListener;
@@ -18,16 +23,18 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.WritableMap;
 
-import java.io.File;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Logger;
 
+import br.com.gertec.gedi.GEDI;
+import br.com.gertec.gedi.enums.GEDI_PRNTR_e_Alignment;
 import br.com.gertec.gedi.enums.GEDI_PRNTR_e_Status;
 import br.com.gertec.gedi.exceptions.GediException;
 import br.com.gertec.gedi.interfaces.ICL;
+import br.com.gertec.gedi.interfaces.IGEDI;
 import br.com.gertec.gedi.interfaces.IPRNTR;
+import br.com.gertec.gedi.structs.GEDI_PRNTR_st_PictureConfig;
 import rede.smartrede.sdk.FlexTipoPagamento;
 import rede.smartrede.sdk.Payment;
 import rede.smartrede.sdk.PaymentIntentBuilder;
@@ -47,6 +54,16 @@ public class Rede extends ReactContextBaseJavaModule implements ActivityEventLis
     private int countImages = 0;
     private int countPrint = 0;
 
+    private static final int WIDTH = 400;
+
+    // CLASSE DE IMPRESSÃO
+    private IGEDI iGedi = null;
+    private IPRNTR iPrint = null;
+    private ICL icl = null;
+
+    private GEDI_PRNTR_st_PictureConfig pictureConfig;
+    private GEDI_PRNTR_e_Status status;
+    private ConfigPrint configPrint;
 
     //constructor
     public Rede(ReactApplicationContext reactContext) {
@@ -54,6 +71,17 @@ public class Rede extends ReactContextBaseJavaModule implements ActivityEventLis
         redePayments = RedePayments.getInstance(reactContext);
         reactContext.addActivityEventListener(this);
 
+        new Thread(() -> {
+            GEDI.init(reactContext);
+            this.iGedi = GEDI.getInstance(reactContext);
+            this.iPrint = this.iGedi.getPRNTR();
+            try {
+                new Thread().sleep(250);
+                icl = GEDI.getInstance().getCL();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }).start();
     }
 
     //Mandatory function getName that specifies the module name
@@ -123,26 +151,81 @@ public class Rede extends ReactContextBaseJavaModule implements ActivityEventLis
             promise.reject("error", e.getMessage());
         }
     }
-    
+
 
     @ReactMethod
     public void getStatusPrint(final Promise promise) throws GediException {
-        promise.resolve("00000");
+        try {
+            printerInit();
+            promise.resolve(this.iPrint.Status().toString());
+        } catch (GediException e) {
+            promise.reject(null, e.getMessage());
+        }
+    }
+
+    public void printerInit() throws GediException {
+        try {
+            if (this.iPrint != null && !isPrintInit) {
+                this.icl.PowerOff();
+                this.iPrint.Init();
+                isPrintInit = true;
+            }
+        } catch (GediException e) {
+            Log.d(e.getMessage(), e.getErrorCode().toString());
+        }
+    }
+
+    public boolean isPrintOK() {
+        if (status.getValue() == 0) {
+            return true;
+        }
+        return false;
     }
 
     @ReactMethod
-    public void print(final Promise promise) throws IOException, Exception {
-        countPrint = 0;
-        File file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/Download/");
-        File[] arquivos = file.listFiles();
-        countImages = arquivos.length;
-        Log.v("LOG133", String.valueOf(countImages));
-        promise.resolve(String.valueOf(countImages));
-
-        //Print Data
-
+    public void print(String imgBase64, @NonNull Promise promise) throws GediException{
+        Bitmap bmp;
+        byte[] imageByte;
+        try {
+            imageByte = Base64.decode(imgBase64, Base64.DEFAULT);
+            bmp = BitmapFactory.decodeByteArray(imageByte, 0, imageByte.length);
+            pictureConfig = new GEDI_PRNTR_st_PictureConfig();
+            pictureConfig.alignment = GEDI_PRNTR_e_Alignment.CENTER;
+            pictureConfig.height = (int) ceil((WIDTH * bmp.getHeight()) / bmp.getWidth());
+            pictureConfig.width = WIDTH;
+            printerInit();
+            this.iPrint.DrawPictureExt(pictureConfig,bmp);
+            this.advanceLine(100);
+            printOutput();
+            promise.resolve("Success");
+        }catch (IllegalArgumentException e){
+            promise.reject(null, e.getMessage());
+        } catch (GediException e) {
+            promise.reject(null, e.getMessage());
+        }
     }
 
+    public void printOutput() throws GediException {
+        try {
+            if( this.iPrint != null  ){
+                this.iPrint.Output();
+                isPrintInit = false;
+            }
+        } catch (GediException e) {
+            e.printStackTrace();
+            throw new GediException(e.getErrorCode());
+        }
+    }
+
+    public void advanceLine(int row) throws GediException {
+        try {
+            if(row > 0){
+                this.iPrint.DrawBlankLine(row);
+            }
+        } catch (GediException e) {
+            throw new GediException(e.getErrorCode());
+        }
+    }
 
     @Override
     public void onActivityResult(Activity activity, int requestCode, int resultCode, @Nullable Intent intent) {

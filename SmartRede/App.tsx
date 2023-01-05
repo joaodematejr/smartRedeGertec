@@ -59,7 +59,7 @@ function App() {
   }
 
   function handlePrint() {
-    Rede.print()
+    Rede.print(imgBase64 as String)
       .then((response: any) => {
         console.log('22', response);
       })
@@ -110,7 +110,9 @@ function App() {
           <Text>Gerar Imagem</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.button} onPress={() => handleStatusPrint()}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => handleStatusPrint()}>
           <Text>Status Impressora</Text>
         </TouchableOpacity>
 
